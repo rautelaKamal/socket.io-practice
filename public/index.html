@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hostel chat</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+      #log { border: 1px solid #ccc; border-radius: 8px; height: 320px; overflow-y: auto; padding: 8px 12px; }
+      #log p { margin: 4px 0; }
+      .mine { color: #0a7a52; }
+      .sys { color: #888; font-style: italic; }
+      form { display: flex; gap: 8px; margin-top: 8px; }
+      #text { flex: 1; padding: 8px; }
+      .bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Hostel chat</h1>
+    <div class="bar">
+      <label>Log in as
+        <select id="token">
+          <option value="token-kamal">Kamal</option>
+          <option value="token-rohit">Rohit</option>
+          <option value="token-meera">Meera</option>
+        </select>
+      </label>
+      <label>Room
+        <select id="room">
+          <option>general</option>
+          <option>floor-2</option>
+        </select>
+      </label>
+      <button id="connect">Connect</button>
+    </div>
+
+    <div id="log"></div>
+    <p id="typing" class="sys">&nbsp;</p>
+    <form id="form">
+      <input id="text" autocomplete="off" placeholder="Type a message" disabled />
+      <button id="send" disabled>Send</button>
+    </form>
+
+    <!-- Socket.io serves its own client script at this path automatically -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let socket;
+      let roomId;
+      let lastSeenId; // the bookmark: highest message id we've shown
+      let lastTypingSent = 0;
+
+      // textContent (never innerHTML) for anything users typed:
+      // a message like <img src=x onerror=alert(1)> stays harmless text (blocks XSS).
+      function show(text, cls) {
+        const p = document.createElement("p");
+        p.textContent = text;
+        if (cls) p.className = cls;
+        $("log").append(p);
+        $("log").scrollTop = $("log").scrollHeight;
+      }
+
+      function showMessage(m, mine) {
+        show(`[${m.id}] ${m.userName}: ${m.text}`, mine ? "mine" : "");
+        lastSeenId = Math.max(lastSeenId ?? 0, m.id);
+      }
+
+      function enable(on) {
+        $("text").disabled = !on;
+        $("send").disabled = !on;
+      }
+
+      $("connect").onclick = () => {
+        if (socket) socket.disconnect();
+        roomId = $("room").value;
+        lastSeenId = undefined;
+        $("log").replaceChildren();
+
+        socket = io({ auth: { token: $("token").value } });
+
+        // Fires on the first connect AND after every automatic reconnect.
+        // Rooms are forgotten when a connection dies, so we (re)join every time,
+        // sending our bookmark so the server returns only what we missed.
+        socket.on("connect", () => {
+          const rejoining = lastSeenId !== undefined;
+          socket.emit("room:join", { roomId, lastSeenId }, (res) => {
+            if (!res.ok) return show("Error: " + res.error.message, "sys");
+            show(rejoining ? "Reconnected, caught up on missed messages" : "Joined " + roomId, "sys");
+            res.data.messages.forEach((m) => showMessage(m, false));
+            enable(true);
+          });
+        });
+
+        socket.on("connect_error", (err) => show("Connection error: " + err.message, "sys"));
+        socket.on("disconnect", () => {
+          show("Disconnected, reconnecting...", "sys");
+          enable(false);
+        });
+        socket.on("message:new", (m) => showMessage(m, false));
+
+        let typingTimer;
+        socket.on("typing", (t) => {
+          $("typing").textContent = t.userName + " is typing...";
+          clearTimeout(typingTimer);
+          typingTimer = setTimeout(() => ($("typing").innerHTML = "&nbsp;"), 1500);
+        });
+      };
+
+      $("form").onsubmit = (e) => {
+        e.preventDefault();
+        const text = $("text").value;
+        if (!text.trim()) return;
+        $("text").value = "";
+
+        // Wait at most 5 s for the ack. No ack = not delivered (the WhatsApp clock icon).
+        socket.timeout(5000).emit("message:send", { roomId, text }, (err, res) => {
+          if (err) return show("No reply from server, message not sent", "sys");
+          if (!res.ok) return show("Not sent: " + res.error.message, "sys");
+          showMessage(res.data.message, true); // the ack is our "tick"
+        });
+      };
+
+      // Tell others we're typing, at most once per second (don't flood the server).
+      $("text").oninput = () => {
+        const now = Date.now();
+        if (now - lastTypingSent > 1000) {
+          socket.emit("typing", { roomId });
+          lastTypingSent = now;
+        }
+      };
+    </script>
+  </body>
+</html>

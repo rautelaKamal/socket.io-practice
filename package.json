@@ -1,0 +1,24 @@
+{
+  "name": "chat-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time hostel chat with Socket.io: rooms, acks, catch-up, auth, validation, rate limiting.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "tsx test/chat.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
